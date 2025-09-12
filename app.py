@@ -24,15 +24,12 @@ def load_data():
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
         events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
         
-        # Fichiers avec séparateur virgule (standard)
         df_sales = pd.read_csv(sales_url)
         df_traffic = pd.read_csv(traffic_url)
-        
-        # Fichiers avec séparateur point-virgule (;)
         df_catalog = pd.read_csv(catalog_url, sep=';')
         df_events = pd.read_csv(events_url, sep=';')
         
-        # Sécurité : nettoyer les noms de colonnes pour enlever les espaces
+        # Sécurité : nettoyer les noms de colonnes
         df_catalog.columns = df_catalog.columns.str.strip()
         df_traffic.columns = df_traffic.columns.str.strip()
         
@@ -43,9 +40,9 @@ def load_data():
 
 def clean_and_merge_data(df_sales, df_traffic):
     """Nettoie et fusionne les données de ventes et de trafic."""
-    # Conversion des colonnes de date
-    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'], dayfirst=True)
-    df_traffic['date'] = pd.to_datetime(df_traffic['date'], dayfirst=True)
+    # CORRECTION : Utilisation de format='mixed' pour gérer les dates inconsistantes
+    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'], format='mixed', dayfirst=True)
+    df_traffic['date'] = pd.to_datetime(df_traffic['date'], format='mixed', dayfirst=True)
 
     # Agréger les données de trafic par jour
     daily_traffic = df_traffic.groupby('date').agg(
@@ -53,7 +50,7 @@ def clean_and_merge_data(df_sales, df_traffic):
         unique_visitors=('unique_visitors', 'sum')
     ).reset_index()
     
-    # Fusion des dataframes de ventes et de trafic journalier
+    # Fusion des dataframes
     df = pd.merge(df_sales, daily_traffic, left_on='order_date', right_on='date', how='left')
     return df
 
@@ -65,11 +62,11 @@ if df_sales is not None:
     
     # --- PRÉPARATION DES FEATURES POUR PROPHET ---
     
-    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], dayfirst=True)
-    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'], dayfirst=True)
-    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'], dayfirst=True)
+    # CORRECTION : Utilisation de format='mixed'
+    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], format='mixed', dayfirst=True)
+    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'], format='mixed', dayfirst=True)
+    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'], format='mixed', dayfirst=True)
 
-    # Fusion avec le catalogue en utilisant les bonnes clés : 'product_sku' et 'sku'
     df_featured = pd.merge(df_cleaned, df_catalog, left_on='product_sku', right_on='sku', how='left')
     
     df_featured['est_en_promo'] = False
@@ -94,30 +91,20 @@ if df_sales is not None:
 
     daily_df = daily_df.rename(columns={'order_date': 'ds', 'revenue': 'y'})
     
-    promos = pd.DataFrame({
-        'holiday': 'promotion',
-        'ds': daily_df[daily_df['is_promo_day'] == True]['ds'],
-    })
-    media_plans = pd.DataFrame({
-        'holiday': 'plan_media',
-        'ds': daily_df[daily_df['is_media_day'] == True]['ds'],
-    })
+    promos = pd.DataFrame({'holiday': 'promotion', 'ds': daily_df[daily_df['is_promo_day'] == True]['ds']})
+    media_plans = pd.DataFrame({'holiday': 'plan_media', 'ds': daily_df[daily_df['is_media_day'] == True]['ds']})
     holidays_df = pd.concat((promos, media_plans))
 
     # --- Barre latérale ---
     st.sidebar.header("Paramètres de la prédiction")
-    months_to_predict = st.sidebar.slider(
-        "Nombre de mois à prédire :", min_value=1, max_value=24, value=6, step=1
-    )
+    months_to_predict = st.sidebar.slider("Nombre de mois à prédire :", 1, 24, 6)
     periods_to_predict = months_to_predict * 30
 
     # --- Modélisation et Prédiction ---
     if st.sidebar.button("Lancer la prédiction"):
         with st.spinner("Entraînement du modèle..."):
-            
             model = Prophet(holidays=holidays_df, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
             model.fit(daily_df[['ds', 'y']])
-            
             future = model.make_future_dataframe(periods=periods_to_predict)
             forecast = model.predict(future)
 
@@ -134,10 +121,10 @@ if df_sales is not None:
 
             csv = forecast.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Télécharger les prédictions en CSV",
-                data=csv,
-                file_name=f'predictions_revenue_{months_to_predict}_mois.csv',
-                mime='text/csv',
+                "Télécharger les prédictions en CSV",
+                csv,
+                f'predictions_revenue_{months_to_predict}_mois.csv',
+                'text/csv',
             )
 else:
     st.warning("Impossible de charger les données.")
