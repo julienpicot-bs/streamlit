@@ -1,22 +1,141 @@
 import streamlit as st
 import pandas as pd
+from prophet import Prophet
+from prophet.plot import plot_plotly, plot_components_plotly
 
-st.set_page_config(page_title="Diagnostic Trafic", layout="wide")
-st.title("🐛 Diagnostic du Fichier `magento_traffic_24months.csv`")
+# --- Configuration de la page Streamlit ---
+st.set_page_config(
+    page_title="Prédiction de Chiffre d'Affaires",
+    page_icon="📈",
+    layout="wide"
+)
 
-try:
-    # On charge uniquement le fichier qui pose problème
-    traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_traffic_24months.csv'
-    df_traffic = pd.read_csv(traffic_url)
+st.title("📈 Outil de Prédiction de Chiffre d'Affaires")
+st.write("Prédiction du chiffre d'affaires basée sur les données de ventes, de trafic et les événements marketing.")
 
-    st.header("Analyse du fichier")
+# --- Fonctions de chargement et de traitement des données ---
+
+@st.cache_data
+def load_data():
+    """Charge tous les fichiers de données depuis GitHub."""
+    try:
+        sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
+        # ATTENTION : On utilise le NOUVEAU fichier de trafic
+        traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/2025-09-12T13-44_export.csv'
+        catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
+        events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
+        
+        df_sales = pd.read_csv(sales_url)
+        df_traffic = pd.read_csv(traffic_url)
+        df_catalog = pd.read_csv(catalog_url)
+        df_events = pd.read_csv(events_url)
+        
+        # Sécurité : nettoyer les noms de colonnes pour enlever les espaces
+        df_catalog.columns = df_catalog.columns.str.strip()
+        df_traffic.columns = df_traffic.columns.str.strip()
+        
+        return df_sales, df_traffic, df_catalog, df_events
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des données depuis GitHub : {e}")
+        return None, None, None, None
+
+def clean_and_merge_data(df_sales, df_traffic):
+    """Nettoie et fusionne les données de ventes et de trafic."""
+    # Conversion des colonnes de date
+    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'])
+    df_traffic['date'] = pd.to_datetime(df_traffic['date'])
+
+    # Agréger les données de trafic par jour (car il y a plusieurs lignes par jour)
+    daily_traffic = df_traffic.groupby('date').agg(
+        visits=('visits', 'sum'),
+        unique_visitors=('unique_visitors', 'sum')
+    ).reset_index()
     
-    st.info("Voici la liste exacte des colonnes trouvées dans votre fichier :")
-    # AFFICHE LA LISTE BRUTE DES COLONNES
-    st.code(df_traffic.columns.tolist())
-    
-    st.write("Aperçu des 5 premières lignes du fichier :")
-    st.dataframe(df_traffic.head())
+    # Fusion des dataframes de ventes et de trafic journalier
+    df = pd.merge(df_sales, daily_traffic, left_on='order_date', right_on='date', how='left')
+    return df
 
-except Exception as e:
-    st.error(f"Une erreur est survenue lors de la lecture du fichier : {e}")
+# --- Chargement et préparation des données ---
+df_sales, df_traffic, df_catalog, df_events = load_data()
+
+if df_sales is not None:
+    # Nettoyage et fusion des données de ventes et trafic
+    df_cleaned = clean_and_merge_data(df_sales, df_traffic)
+    
+    # --- PRÉPARATION DES FEATURES POUR PROPHET ---
+    
+    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'])
+    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'])
+    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'])
+
+    df_featured = pd.merge(df_cleaned, df_catalog, on='product_sku', how='left')
+    
+    df_featured['est_en_promo'] = False
+    df_featured['promo_avec_media'] = False
+
+    for _, event in df_events.iterrows():
+        event_mask = (
+            (df_featured['product_sku'] == event['sku']) &
+            (df_featured['order_date'] >= event['date_debut']) &
+            (df_featured['order_date'] <= event['date_fin'])
+        )
+        if event['type_evenement'] in ['PROMOTION', 'SOLDES']:
+            df_featured.loc[event_mask, 'est_en_promo'] = True
+        elif event['type_evenement'] == 'PLAN_MEDIA':
+            df_featured.loc[event_mask, 'promo_avec_media'] = True
+
+    daily_df = df_featured.groupby('order_date').agg(
+        revenue=('row_total', 'sum'),
+        is_promo_day=('est_en_promo', 'max'),
+        is_media_day=('promo_avec_media', 'max')
+    ).reset_index()
+
+    daily_df = daily_df.rename(columns={'order_date': 'ds', 'revenue': 'y'})
+    
+    promos = pd.DataFrame({
+        'holiday': 'promotion',
+        'ds': daily_df[daily_df['is_promo_day'] == True]['ds'],
+    })
+    media_plans = pd.DataFrame({
+        'holiday': 'plan_media',
+        'ds': daily_df[daily_df['is_media_day'] == True]['ds'],
+    })
+    holidays_df = pd.concat((promos, media_plans))
+
+    # --- Barre latérale (INCHANGÉE) ---
+    st.sidebar.header("Paramètres de la prédiction")
+    months_to_predict = st.sidebar.slider(
+        "Nombre de mois à prédire :", min_value=1, max_value=24, value=6, step=1
+    )
+    periods_to_predict = months_to_predict * 30
+
+    # --- Modélisation et Prédiction ---
+    if st.sidebar.button("Lancer la prédiction"):
+        with st.spinner("Entraînement du modèle..."):
+            
+            model = Prophet(holidays=holidays_df, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+            model.fit(daily_df[['ds', 'y']])
+            
+            future = model.make_future_dataframe(periods=periods_to_predict)
+            forecast = model.predict(future)
+
+            st.subheader(f"Prédiction du CA pour les {months_to_predict} prochains mois")
+            fig_forecast = plot_plotly(model, forecast)
+            st.plotly_chart(fig_forecast, use_container_width=True)
+
+            st.subheader("Analyse des tendances et saisonnalités")
+            fig_components = plot_components_plotly(model, forecast)
+            st.plotly_chart(fig_components, use_container_width=True)
+
+            st.subheader("Détail des données prédites")
+            st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods_to_predict))
+
+            csv = forecast.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Télécharger les prédictions en CSV",
+                data=csv,
+                file_name=f'predictions_revenue_{months_to_predict}_mois.csv',
+                mime='text/csv',
+            )
+else:
+    st.warning("Impossible de charger les données.")
