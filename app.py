@@ -1,54 +1,59 @@
 import streamlit as st
 import pandas as pd
-# On n'importe pas Prophet pour l'instant pour simplifier le débogage
-# from prophet import Prophet
-# from prophet.plot import plot_plotly, plot_components_plotly
-# import plotly.graph_objs as go
+import io
 
-# --- Configuration de la page Streamlit ---
 st.set_page_config(
-    page_title="Débogage des Données",
-    page_icon="🐛",
+    page_title="Diagnostic CSV",
+    page_icon="ախ",
     layout="wide"
 )
 
-st.title("🐛 Outil de Débogage des Fichiers CSV")
+st.title("ախ Diagnostic Avancé du Fichier CSV")
 
 @st.cache_data
-def load_data():
-    """Charge les 3 fichiers CSV depuis GitHub."""
+def load_catalog_data():
+    """Charge uniquement le fichier catalogue pour le diagnostic."""
     try:
-        sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
-        events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
-        
-        df_sales = pd.read_csv(sales_url)
-        df_catalog = pd.read_csv(catalog_url)
-        df_events = pd.read_csv(events_url)
-        
-        return df_sales, df_catalog, df_events
+        # On utilise requests pour mieux gérer le contenu texte
+        import requests
+        response = requests.get(catalog_url)
+        response.raise_for_status() # Lève une erreur si le téléchargement échoue
+        return response.text
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données depuis GitHub : {e}")
-        return None, None, None
+        st.error(f"Erreur critique lors du téléchargement du fichier depuis GitHub : {e}")
+        return None
 
-# --- Chargement et VÉRIFICATION des données ---
-df_sales, df_catalog, df_events = load_data()
+# --- Chargement et Diagnostic ---
+csv_text_data = load_catalog_data()
 
-if df_catalog is not None:
-    st.header("Analyse du fichier `catalogue_produits.csv`")
+if csv_text_data:
+    st.header("Analyse du contenu du fichier `catalogue_produits.csv`")
     
-    # AFFICHE LES 5 PREMIÈRES LIGNES DU FICHIER TEL QU'IL EST LU
-    st.write("Voici un aperçu des données lues :")
-    st.dataframe(df_catalog.head())
-    
-    # AFFICHE LA LISTE EXACTE DES COLONNES
-    st.info("Voici la liste exacte des colonnes trouvées dans `catalogue_produits.csv` :")
-    st.write(df_catalog.columns.tolist())
-    
-    st.warning("L'application est arrêtée ici pour le débogage. Comparez la liste ci-dessus avec le nom de colonne attendu ('date_lancement').")
-    
-    # Arrête le script pour voir le résultat sans provoquer l'erreur
-    st.stop()
+    st.subheader("Tentative de lecture avec une virgule (`,`) comme séparateur")
+    try:
+        df_comma = pd.read_csv(io.StringIO(csv_text_data), sep=',')
+        st.write("Aperçu des données (séparateur virgule) :")
+        st.dataframe(df_comma.head())
+        st.info("Colonnes trouvées (séparateur virgule) :")
+        st.write(df_comma.columns.tolist())
+    except Exception as e:
+        st.error(f"La lecture avec une virgule a échoué : {e}")
 
-# Le reste du code ne sera pas exécuté pour l'instant
-# ...
+    st.markdown("---")
+
+    st.subheader("Tentative de lecture avec un point-virgule (`;`) comme séparateur")
+    try:
+        df_semicolon = pd.read_csv(io.StringIO(csv_text_data), sep=';')
+        st.write("Aperçu des données (séparateur point-virgule) :")
+        st.dataframe(df_semicolon.head())
+        st.info("Colonnes trouvées (séparateur point-virgule) :")
+        st.write(df_semicolon.columns.tolist())
+    except Exception as e:
+        st.error(f"La lecture avec un point-virgule a échoué : {e}")
+    
+    st.markdown("---")
+    st.warning("Regardez quelle tentative a correctement séparé les colonnes. C'est celle-là qui nous donne le bon séparateur.")
+
+else:
+    st.error("Le fichier n'a pas pu être chargé. Impossible de continuer le diagnostic.")
