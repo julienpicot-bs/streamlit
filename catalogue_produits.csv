@@ -1,13 +1,11 @@
 sku,nom_produit,date_lancement
-SKU002,T-shirt Basic,20/03/2022
-SKU009,Lunettes Soleil,15/05/2023
-SKU001,Sneaker Alpha,01/09/2021
-SKU006,Montre Connectée,10/11/2023
-SKU004,Sac Weekend,30/07/2020
-SKU008,Ceinture en cuir,18/01/2022
-SKU003,Jean Classic,05/10/2019
-SKU010,Portefeuille Compact,28/02/2024
-SKU005,Chemise Casual,11/04/2023
-SKU007,Veste Hiver,25/10/2021
-
-
+SKU002,T-shirt Basic,2022-03-20
+SKU009,Lunettes Soleil,2023-05-15
+SKU001,Sneaker Alpha,2021-09-01
+SKU006,Montre Connectée,2023-11-10
+SKU004,Sac Weekend,2020-07-30
+SKU008,Ceinture en cuir,2022-01-18
+SKU003,Jean Classic,2019-10-05
+SKU010,Portefeuille Compact,2024-02-28
+SKU005,Chemise Casual,2023-04-11
+SKU007,Veste Hiver,2021-10-25
