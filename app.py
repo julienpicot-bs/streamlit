@@ -61,6 +61,40 @@ if df_sales is not None:
     df_cleaned = clean_and_merge_data(df_sales, df_traffic)
     
     # --- PRÉPARATION DES FEATURES POUR PROPHET ---
+
+# Remplacez cette partie dans votre code existant :
+
+# --- PRÉPARATION DES FEATURES POUR PROPHET ---
+
+# Debug des colonnes avant traitement
+st.write("🔍 **Debug des colonnes:**")
+st.write("Colonnes df_catalog:", list(df_catalog.columns))
+st.write("Colonnes df_events:", list(df_events.columns))
+
+# Nettoyage des noms de colonnes
+df_catalog.columns = df_catalog.columns.str.strip()
+df_events.columns = df_events.columns.str.strip()
+
+# Afficher les colonnes après nettoyage
+st.write("Colonnes après nettoyage df_catalog:", list(df_catalog.columns))
+
+# Conversion des dates avec vérification d'existence des colonnes
+if 'date_lancement' in df_catalog.columns:
+    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], format='mixed', dayfirst=True, errors='coerce')
+else:
+    st.error("❌ La colonne 'date_lancement' n'existe pas dans df_catalog")
+    st.write("Colonnes disponibles:", list(df_catalog.columns))
+    st.stop()  # Arrêter l'exécution
+
+if 'date_debut' in df_events.columns and 'date_fin' in df_events.columns:
+    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'], format='mixed', dayfirst=True, errors='coerce')
+    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'], format='mixed', dayfirst=True, errors='coerce')
+else:
+    st.error("❌ Les colonnes de dates n'existent pas dans df_events")
+    st.write("Colonnes disponibles:", list(df_events.columns))
+    st.stop()  # Arrêter l'exécution
+
+# Le reste de votre code continue ici...
     
     # CORRECTION : Utilisation de format='mixed'
     df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], format='mixed', dayfirst=True)
@@ -128,3 +162,4 @@ if df_sales is not None:
             )
 else:
     st.warning("Impossible de charger les données.")
+
