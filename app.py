@@ -20,8 +20,8 @@ def load_data():
     """Charge tous les fichiers de données depuis GitHub."""
     try:
         sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
-        # ATTENTION : On utilise le NOUVEAU fichier de trafic
-        traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/2025-09-12T13-44_export.csv'
+        # Utilisation du bon fichier de trafic confirmé par l'utilisateur
+        traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_traffic_24months.csv'
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
         events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
         
@@ -46,6 +46,7 @@ def clean_and_merge_data(df_sales, df_traffic):
     df_traffic['date'] = pd.to_datetime(df_traffic['date'])
 
     # Agréger les données de trafic par jour (car il y a plusieurs lignes par jour)
+    # On utilise les noms de colonnes corrects : 'visits' et 'unique_visitors'
     daily_traffic = df_traffic.groupby('date').agg(
         visits=('visits', 'sum'),
         unique_visitors=('unique_visitors', 'sum')
