@@ -1,59 +1,42 @@
 import streamlit as st
 import pandas as pd
-import io
+from prophet import Prophet
+from prophet.plot import plot_plotly, plot_components_plotly
+import plotly.graph_objs as go
 
+# --- Configuration de la page Streamlit ---
 st.set_page_config(
-    page_title="Diagnostic CSV",
-    page_icon="ախ",
+    page_title="Prédiction de Chiffre d'Affaires",
+    page_icon="📈",
     layout="wide"
 )
 
-st.title("ախ Diagnostic Avancé du Fichier CSV")
+st.title("📈 Outil de Prédiction de Chiffre d'Affaires")
+st.write("Cette application analyse les données de ventes et les événements marketing pour prédire le chiffre d'affaires futur.")
 
-@st.cache_data
-def load_catalog_data():
-    """Charge uniquement le fichier catalogue pour le diagnostic."""
+# --- Fonctions de chargement et de traitement des données ---
+
+# IMPORTANT : Le cache est désactivé pour forcer le rechargement des fichiers
+def load_data():
+    """Charge les 3 fichiers CSV depuis GitHub."""
     try:
+        # Liens vers les fichiers RAW sur GitHub
+        sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
-        # On utilise requests pour mieux gérer le contenu texte
-        import requests
-        response = requests.get(catalog_url)
-        response.raise_for_status() # Lève une erreur si le téléchargement échoue
-        return response.text
+        events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
+        
+        df_sales = pd.read_csv(sales_url)
+        df_catalog = pd.read_csv(catalog_url)
+        df_events = pd.read_csv(events_url)
+        
+        # Sécurité : On nettoie les noms de colonnes pour enlever les espaces invisibles
+        df_catalog.columns = df_catalog.columns.str.strip()
+        
+        return df_sales, df_catalog, df_events
     except Exception as e:
-        st.error(f"Erreur critique lors du téléchargement du fichier depuis GitHub : {e}")
-        return None
+        st.error(f"Erreur lors du chargement des données depuis GitHub : {e}")
+        return None, None, None
 
-# --- Chargement et Diagnostic ---
-csv_text_data = load_catalog_data()
-
-if csv_text_data:
-    st.header("Analyse du contenu du fichier `catalogue_produits.csv`")
-    
-    st.subheader("Tentative de lecture avec une virgule (`,`) comme séparateur")
-    try:
-        df_comma = pd.read_csv(io.StringIO(csv_text_data), sep=',')
-        st.write("Aperçu des données (séparateur virgule) :")
-        st.dataframe(df_comma.head())
-        st.info("Colonnes trouvées (séparateur virgule) :")
-        st.write(df_comma.columns.tolist())
-    except Exception as e:
-        st.error(f"La lecture avec une virgule a échoué : {e}")
-
-    st.markdown("---")
-
-    st.subheader("Tentative de lecture avec un point-virgule (`;`) comme séparateur")
-    try:
-        df_semicolon = pd.read_csv(io.StringIO(csv_text_data), sep=';')
-        st.write("Aperçu des données (séparateur point-virgule) :")
-        st.dataframe(df_semicolon.head())
-        st.info("Colonnes trouvées (séparateur point-virgule) :")
-        st.write(df_semicolon.columns.tolist())
-    except Exception as e:
-        st.error(f"La lecture avec un point-virgule a échoué : {e}")
-    
-    st.markdown("---")
-    st.warning("Regardez quelle tentative a correctement séparé les colonnes. C'est celle-là qui nous donne le bon séparateur.")
-
-else:
-    st.error("Le fichier n'a pas pu être chargé. Impossible de continuer le diagnostic.")
+# IMPORTANT : Le cache est désactivé
+def create_features(df_sales, df_catalog, df_events):
+    """Fusion
