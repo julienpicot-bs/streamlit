@@ -43,10 +43,10 @@ def clean_data(df_sales, df_traffic):
     df_sales['order_date'] = pd.to_datetime(df_sales['order_date'])
     df_traffic['date'] = pd.to_datetime(df_traffic['date'])
 
-    # Nettoyage des données de trafic
-    df_traffic['sessions'] = df_traffic['sessions'].str.replace(',', '').astype(int)
-    df_traffic['pageviews'] = df_traffic['pageviews'].str.replace(',', '').astype(int)
-    df_traffic['users'] = df_traffic['users'].str.replace(',', '').astype(int)
+    # Nettoyage des données de trafic AVEC LES BONS NOMS DE COLONNES (Majuscules)
+    df_traffic['Sessions'] = df_traffic['Sessions'].str.replace(',', '').astype(int)
+    df_traffic['Pageviews'] = df_traffic['Pageviews'].str.replace(',', '').astype(int)
+    df_traffic['Users'] = df_traffic['Users'].str.replace(',', '').astype(int)
     
     # Fusion des dataframes de ventes et de trafic
     df = pd.merge(df_sales, df_traffic, left_on='order_date', right_on='date', how='left')
@@ -150,3 +150,4 @@ if df_sales is not None:
             )
 else:
     st.warning("Impossible de charger les données. Veuillez vérifier les liens GitHub ou votre connexion internet.")
+
