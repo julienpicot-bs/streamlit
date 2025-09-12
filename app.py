@@ -17,18 +17,20 @@ st.write("Prédiction du chiffre d'affaires basée sur les données de ventes, d
 
 @st.cache_data
 def load_data():
-    """Charge tous les fichiers de données depuis GitHub."""
+    """Charge tous les fichiers de données depuis GitHub avec les bons séparateurs."""
     try:
         sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
-        # Utilisation du bon fichier de trafic confirmé par l'utilisateur
         traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_traffic_24months.csv'
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
         events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
         
+        # Fichiers avec séparateur virgule (standard)
         df_sales = pd.read_csv(sales_url)
         df_traffic = pd.read_csv(traffic_url)
-        df_catalog = pd.read_csv(catalog_url)
-        df_events = pd.read_csv(events_url)
+        
+        # Fichiers avec séparateur point-virgule (;)
+        df_catalog = pd.read_csv(catalog_url, sep=';')
+        df_events = pd.read_csv(events_url, sep=';')
         
         # Sécurité : nettoyer les noms de colonnes pour enlever les espaces
         df_catalog.columns = df_catalog.columns.str.strip()
@@ -42,11 +44,10 @@ def load_data():
 def clean_and_merge_data(df_sales, df_traffic):
     """Nettoie et fusionne les données de ventes et de trafic."""
     # Conversion des colonnes de date
-    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'])
-    df_traffic['date'] = pd.to_datetime(df_traffic['date'])
+    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'], dayfirst=True)
+    df_traffic['date'] = pd.to_datetime(df_traffic['date'], dayfirst=True)
 
-    # Agréger les données de trafic par jour (car il y a plusieurs lignes par jour)
-    # On utilise les noms de colonnes corrects : 'visits' et 'unique_visitors'
+    # Agréger les données de trafic par jour
     daily_traffic = df_traffic.groupby('date').agg(
         visits=('visits', 'sum'),
         unique_visitors=('unique_visitors', 'sum')
@@ -60,16 +61,16 @@ def clean_and_merge_data(df_sales, df_traffic):
 df_sales, df_traffic, df_catalog, df_events = load_data()
 
 if df_sales is not None:
-    # Nettoyage et fusion des données de ventes et trafic
     df_cleaned = clean_and_merge_data(df_sales, df_traffic)
     
     # --- PRÉPARATION DES FEATURES POUR PROPHET ---
     
-    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'])
-    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'])
-    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'])
+    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], dayfirst=True)
+    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'], dayfirst=True)
+    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'], dayfirst=True)
 
-    df_featured = pd.merge(df_cleaned, df_catalog, on='product_sku', how='left')
+    # Fusion avec le catalogue en utilisant les bonnes clés : 'product_sku' et 'sku'
+    df_featured = pd.merge(df_cleaned, df_catalog, left_on='product_sku', right_on='sku', how='left')
     
     df_featured['est_en_promo'] = False
     df_featured['promo_avec_media'] = False
@@ -103,7 +104,7 @@ if df_sales is not None:
     })
     holidays_df = pd.concat((promos, media_plans))
 
-    # --- Barre latérale (INCHANGÉE) ---
+    # --- Barre latérale ---
     st.sidebar.header("Paramètres de la prédiction")
     months_to_predict = st.sidebar.slider(
         "Nombre de mois à prédire :", min_value=1, max_value=24, value=6, step=1
