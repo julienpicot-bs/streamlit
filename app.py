@@ -1,187 +1,198 @@
 import streamlit as st
 import pandas as pd
-import io
-
-st.set_page_config(page_title="Diagnostic CSV Final", layout="wide")
-st.title("🐛 Diagnostic Final des Fichiers CSV")
-
-@st.cache_data
-def load_debug_data():
-    """Charge les fichiers catalogue et événements pour le diagnostic."""
-    try:
-        catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
-        events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
-        
-        import requests
-        import streamlit as st
-import pandas as pd
+import matplotlib.pyplot as plt
 from prophet import Prophet
-from prophet.plot import plot_plotly, plot_components_plotly
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
 
-# --- Configuration de la page Streamlit ---
-st.set_page_config(
-    page_title="Prédiction de Chiffre d'Affaires",
-    page_icon="📈",
-    layout="wide"
-)
+# ---------------------
+# Chargement des fichiers via l'utilisateur
+# ---------------------
+st.sidebar.header("Charger vos fichiers CSV")
+sales_file = st.sidebar.file_uploader("Fichier ventes Magento", type=["csv"])
+traffic_file = st.sidebar.file_uploader("Fichier trafic", type=["csv"])
 
-st.title("📈 Outil de Prédiction de Chiffre d'Affaires")
-st.write("Prédiction du chiffre d'affaires basée sur les données de ventes, de trafic et les événements marketing.")
+if sales_file is None or traffic_file is None:
+    st.warning("Veuillez charger à la fois le fichier de ventes et le fichier de trafic.")
+    st.stop()
 
-# --- Fonctions de chargement et de traitement des données ---
+# Lecture des fichiers
+df_sales = pd.read_csv(sales_file)
+df_sales["order_date"] = pd.to_datetime(df_sales["order_date"])
 
-@st.cache_data
-def load_data():
-    """Charge tous les fichiers de données depuis GitHub avec les bons séparateurs et encodage."""
-    try:
-        sales_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_fake_24months.csv'
-        traffic_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/magento_traffic_24months.csv'
-        catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
-        events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
-        
-        # Fichiers avec séparateur virgule
-        df_sales = pd.read_csv(sales_url, encoding='utf-8-sig')
-        df_traffic = pd.read_csv(traffic_url, encoding='utf-8-sig')
-        
-        # Fichiers avec séparateur point-virgule (;)
-        df_catalog = pd.read_csv(catalog_url, sep=';', encoding='utf-8-sig')
-        df_events = pd.read_csv(events_url, sep=';', encoding='utf-8-sig')
-        
-        # Sécurité : nettoyer les noms de colonnes
-        df_catalog.columns = df_catalog.columns.str.strip()
-        df_traffic.columns = df_traffic.columns.str.strip()
-        
-        return df_sales, df_traffic, df_catalog, df_events
-    except Exception as e:
-        st.error(f"Erreur lors du chargement des données depuis GitHub : {e}")
-        return None, None, None, None
+df_traffic = pd.read_csv(traffic_file)
+df_traffic["date"] = pd.to_datetime(df_traffic["date"])
 
-def clean_and_merge_data(df_sales, df_traffic):
-    """Nettoie et fusionne les données de ventes et de trafic."""
-    df_sales['order_date'] = pd.to_datetime(df_sales['order_date'], format='mixed', dayfirst=True)
-    df_traffic['date'] = pd.to_datetime(df_traffic['date'], format='mixed', dayfirst=True)
+# ---------------------
+# Fusion ventes + trafic
+# ---------------------
+traffic_agg = df_traffic.groupby(['sku', 'date']).agg({
+    'visits': 'sum',
+    'unique_visitors': 'sum',
+    'avg_time_on_page': 'mean',
+    'bounce_rate': 'mean'
+}).reset_index()
 
-    daily_traffic = df_traffic.groupby('date').agg(
-        visits=('visits', 'sum'),
-        unique_visitors=('unique_visitors', 'sum')
-    ).reset_index()
-    
-    df = pd.merge(df_sales, daily_traffic, left_on='order_date', right_on='date', how='left')
-    return df
+df_combined = pd.merge(
+    df_sales,
+    traffic_agg,
+    left_on=['product_sku', 'order_date'],
+    right_on=['sku', 'date'],
+    how='left'
+).drop(columns=['sku','date'])
 
-# --- Chargement et préparation des données ---
-df_sales, df_traffic, df_catalog, df_events = load_data()
+# Ajouter features temporelles
+df_combined['month'] = df_combined['order_date'].dt.month
+df_combined['year'] = df_combined['order_date'].dt.year
+df_combined['weekday'] = df_combined['order_date'].dt.weekday
 
-if df_sales is not None:
-    df_cleaned = clean_and_merge_data(df_sales, df_traffic)
-    
-    df_catalog['date_lancement'] = pd.to_datetime(df_catalog['date_lancement'], format='mixed', dayfirst=True)
-    df_events['date_debut'] = pd.to_datetime(df_events['date_debut'], format='mixed', dayfirst=True)
-    df_events['date_fin'] = pd.to_datetime(df_events['date_fin'], format='mixed', dayfirst=True)
+# ---------------------
+# Sidebar : paramètres
+# ---------------------
+st.sidebar.header("Paramètres de prédiction")
+sku = st.sidebar.selectbox("Choisir un produit (SKU)", df_combined["product_sku"].unique())
+periods = st.sidebar.slider("Nombre de mois à prédire", 3, 12, 6)
+model_choice = st.sidebar.radio("Choisir un modèle", ["Prophet", "ARIMA", "RandomForest"])
 
-    df_featured = pd.merge(df_cleaned, df_catalog, left_on='product_sku', right_on='sku', how='left')
-    
-    df_featured['est_en_promo'] = False
-    df_featured['promo_avec_media'] = False
+# Filtrer le produit sélectionné
+df_sku = df_combined[df_combined["product_sku"] == sku]
+df_monthly = df_sku.groupby(pd.Grouper(key="order_date", freq="M"))["qty_ordered"].sum().reset_index()
 
-    for _, event in df_events.iterrows():
-        event_mask = (
-            (df_featured['product_sku'] == event['sku']) &
-            (df_featured['order_date'] >= event['date_debut']) &
-            (df_featured['order_date'] <= event['date_fin'])
-        )
-        if event['type_evenement'] in ['PROMOTION', 'SOLDES']:
-            df_featured.loc[event_mask, 'est_en_promo'] = True
-        elif event['type_evenement'] == 'PLAN_MEDIA':
-            df_featured.loc[event_mask, 'promo_avec_media'] = True
+st.title("📊 Prédiction des ventes Magento enrichie")
+st.subheader(f"Produit sélectionné : {sku}")
+st.info(f"Modèle choisi : **{model_choice}**. Les prévisions utilisent les ventes historiques et les données de trafic.")
 
-    daily_df = df_featured.groupby('order_date').agg(
-        revenue=('row_total', 'sum'),
-        is_promo_day=('est_en_promo', 'max'),
-        is_media_day=('promo_avec_media', 'max')
-    ).reset_index()
+# ---------------------
+# Fonction d'analyse des pics
+# ---------------------
+def analyze_forecast(forecast_values, historical_max):
+    messages = []
+    if forecast_values.max() > historical_max * 1.2:
+        messages.append("⚠️ Le modèle prévoit un pic supérieur aux ventes historiques.")
+    if forecast_values.min() < 1:
+        messages.append("ℹ️ Certaines prévisions sont très faibles, période creuse possible.")
+    return messages
 
-    daily_df = daily_df.rename(columns={'order_date': 'ds', 'revenue': 'y'})
-    
-    promos = pd.DataFrame({'holiday': 'promotion', 'ds': daily_df[daily_df['is_promo_day'] == True]['ds']})
-    media_plans = pd.DataFrame({'holiday': 'plan_media', 'ds': daily_df[daily_df['is_media_day'] == True]['ds']})
-    holidays_df = pd.concat((promos, media_plans))
+# ---------------------
+# MODELE 1 : PROPHET
+# ---------------------
+if model_choice == "Prophet":
+    df_prophet = df_monthly.rename(columns={"order_date": "ds", "qty_ordered": "y"})
+    model = Prophet(yearly_seasonality=True)
+    model.fit(df_prophet)
+    future = model.make_future_dataframe(periods=periods, freq="M")
+    forecast = model.predict(future)
 
-    # --- Barre latérale ---
-    st.sidebar.header("Paramètres de la prédiction")
-    months_to_predict = st.sidebar.slider("Nombre de mois à prédire :", 1, 24, 6)
-    periods_to_predict = months_to_predict * 30
+    # Graphique
+    plt.figure(figsize=(10,5))
+    plt.plot(df_prophet["ds"], df_prophet["y"], label="Historique")
+    plt.plot(forecast["ds"], forecast["yhat"], label="Prévision", color="orange")
+    plt.fill_between(forecast["ds"], forecast["yhat_lower"], forecast["yhat_upper"], color='orange', alpha=0.2)
+    plt.title(f"Prévisions des ventes pour {sku} (Prophet)")
+    plt.xlabel("Date")
+    plt.ylabel("Quantité vendue")
+    plt.legend()
+    st.pyplot(plt.gcf())
 
-    # --- Modélisation et Prédiction ---
-    if st.sidebar.button("Lancer la prédiction"):
-        with st.spinner("Entraînement du modèle..."):
-            model = Prophet(holidays=holidays_df, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-            model.fit(daily_df[['ds', 'y']])
-            future = model.make_future_dataframe(periods=periods_to_predict)
-            forecast = model.predict(future)
+    # Explications
+    st.markdown("### Lecture du graphique")
+    st.write("""
+    - **Bleu** : ventes historiques
+    - **Orange** : prévisions
+    - **Zone orange clair** : intervalle de confiance
+    """)
 
-            st.subheader(f"Prédiction du CA pour les {months_to_predict} prochains mois")
-            fig_forecast = plot_plotly(model, forecast)
-            st.plotly_chart(fig_forecast, use_container_width=True)
+    messages = analyze_forecast(forecast["yhat"], df_prophet["y"].max())
+    for msg in messages:
+        st.warning(msg)
 
-            st.subheader("Analyse des tendances et saisonnalités")
-            fig_components = plot_components_plotly(model, forecast)
-            st.plotly_chart(fig_components, use_container_width=True)
+    st.subheader("Prévisions détaillées")
+    st.dataframe(forecast[["ds","yhat","yhat_lower","yhat_upper"]].tail(periods))
 
-            st.subheader("Détail des données prédites")
-            st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods_to_predict))
+# ---------------------
+# MODELE 2 : ARIMA
+# ---------------------
+elif model_choice == "ARIMA":
+    ts = df_monthly.set_index("order_date")["qty_ordered"]
+    model = ARIMA(ts, order=(2,1,2))
+    model_fit = model.fit()
+    forecast = model_fit.forecast(steps=periods)
 
-            csv = forecast.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "Télécharger les prédictions en CSV",
-                csv,
-                f'predictions_revenue_{months_to_predict}_mois.csv',
-                'text/csv',
-            )
-else:
-    st.warning("Impossible de charger les données.")
-        response_catalog = requests.get(catalog_url)
-        response_catalog.raise_for_status()
-        catalog_text = response_catalog.text
+    plt.figure(figsize=(10,5))
+    ts.plot(label="Historique")
+    forecast.plot(label="Prévision", color="red")
+    plt.title(f"Prévisions des ventes pour {sku} (ARIMA)")
+    plt.xlabel("Date")
+    plt.ylabel("Quantité vendue")
+    plt.legend()
+    st.pyplot(plt.gcf())
 
-        response_events = requests.get(events_url)
-        response_events.raise_for_status()
-        events_text = response_events.text
+    st.markdown("### Lecture du graphique")
+    st.write("""
+    - **Bleu** : ventes historiques
+    - **Rouge** : prévisions ARIMA
+    """)
 
-        return catalog_text, events_text
-    except Exception as e:
-        st.error(f"Erreur critique lors du téléchargement d'un fichier depuis GitHub : {e}")
-        return None, None
+    messages = analyze_forecast(forecast, ts.max())
+    for msg in messages:
+        st.warning(msg)
 
-# --- Chargement et Diagnostic ---
-catalog_text_data, events_text_data = load_debug_data()
+    st.subheader("Prévisions détaillées")
+    st.dataframe(pd.DataFrame({
+        "date": pd.date_range(ts.index[-1]+pd.offsets.MonthEnd(), periods=periods, freq="M"),
+        "forecast": forecast.values
+    }))
 
-if catalog_text_data:
-    st.header("Analyse du fichier `catalogue_produits.csv`")
-    st.subheader("Tentative de lecture avec un point-virgule (`;`)")
-    try {
-        df_catalog = pd.read_csv(io.StringIO(catalog_text_data), sep=';')
-        st.write("Aperçu :")
-        st.dataframe(df_catalog.head())
-        st.info("Colonnes trouvées :")
-        st.code(df_catalog.columns.tolist())
-    } catch (Exception e) {
-        st.error(f"La lecture a échoué : {e}")
-    }
+# ---------------------
+# MODELE 3 : RANDOM FOREST
+# ---------------------
+elif model_choice == "RandomForest":
+    # Features pour RandomForest
+    features = ['month','year','weekday','visits','unique_visitors','avg_time_on_page','bounce_rate']
+    df_rf = df_sku.copy()
+    df_rf = df_rf.fillna(0)  # remplacer les NaN par 0 pour les jours sans trafic
+    X = df_rf[features]
+    y = df_rf['qty_ordered']
 
-st.markdown("---")
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X, y)
 
-if events_text_data:
-    st.header("Analyse du fichier `evenements.csv`")
-    st.subheader("Tentative de lecture avec un point-virgule (`;`)")
-    try {
-        df_events = pd.read_csv(io.StringIO(events_text_data), sep=';')
-        st.write("Aperçu :")
-        st.dataframe(df_events.head())
-        st.info("Colonnes trouvées :")
-        st.code(df_events.columns.tolist())
-    } catch (Exception e) {
-        st.error(f"La lecture a échoué : {e}")
-    }
+    # Prévision future
+    last_date = df_rf["order_date"].max()
+    future_dates = pd.date_range(last_date + pd.offsets.MonthEnd(), periods=periods, freq="M")
+    future_df = pd.DataFrame({
+        "month": future_dates.month,
+        "year": future_dates.year,
+        "weekday": future_dates.weekday
+    }, index=future_dates)
 
+    # Pour le trafic futur, utiliser la moyenne historique
+    for col in ['visits','unique_visitors','avg_time_on_page','bounce_rate']:
+        future_df[col] = df_rf[col].mean()
 
+    forecast = model.predict(future_df[features])
+
+    plt.figure(figsize=(10,5))
+    plt.plot(df_rf["order_date"], y, label="Historique")
+    plt.plot(future_dates, forecast, label="Prévision", color="red")
+    plt.title(f"Prévisions des ventes pour {sku} (Random Forest avec trafic)")
+    plt.xlabel("Date")
+    plt.ylabel("Quantité vendue")
+    plt.legend()
+    plt.tight_layout()
+    st.pyplot(plt.gcf())
+
+    st.markdown("### Lecture du graphique")
+    st.write("""
+    - **Bleu** : ventes historiques
+    - **Rouge** : prévisions Random Forest
+    - Les features trafic sont utilisées pour améliorer la prédiction
+    """)
+
+    messages = analyze_forecast(forecast, df_rf["qty_ordered"].max())
+    for msg in messages:
+        st.warning(msg)
+
+    st.subheader("Prévisions détaillées")
+    st.dataframe(pd.DataFrame({"date": future_dates, "forecast": forecast}))
