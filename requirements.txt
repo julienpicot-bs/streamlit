@@ -5,4 +5,6 @@ prophet
 statsmodels
 scikit-learn
 seaborn
+plotly 
+
 
