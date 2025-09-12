@@ -8,28 +8,24 @@ st.title("🐛 Diagnostic Final des Fichiers CSV")
 @st.cache_data
 def load_debug_data():
     """Charge les fichiers catalogue et événements pour le diagnostic."""
-    try {
+    try:
         catalog_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/catalogue_produits.csv'
         events_url = 'https://raw.githubusercontent.com/julienpicot-bs/streamlit/main/evenements.csv'
         
-        # Utiliser requests pour mieux gérer le contenu texte
         import requests
         
-        # Charger le catalogue
         response_catalog = requests.get(catalog_url)
         response_catalog.raise_for_status()
         catalog_text = response_catalog.text
 
-        # Charger les événements
         response_events = requests.get(events_url)
         response_events.raise_for_status()
         events_text = response_events.text
 
         return catalog_text, events_text
-    } catch (Exception e) {
+    except Exception as e:
         st.error(f"Erreur critique lors du téléchargement d'un fichier depuis GitHub : {e}")
         return None, None
-    }
 
 # --- Chargement et Diagnostic ---
 catalog_text_data, events_text_data = load_debug_data()
@@ -61,3 +57,4 @@ if events_text_data:
     } catch (Exception e) {
         st.error(f"La lecture a échoué : {e}")
     }
+
